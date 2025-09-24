@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "tmux-mcp-agent": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/python3.11",
+      "args": [
+        "-m", "tmux_mcp.agent",
+        "--config-dir", ".cursor"
+      ],
+      "cwd": "/Users/bo/myenv/projects/tmux_mcp",
+      "env": {
+        "PYTHONPATH": "/Users/bo/myenv/projects/tmux_mcp/src"
+      }
+    }
+  }
+}

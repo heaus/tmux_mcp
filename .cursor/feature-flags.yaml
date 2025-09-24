@@ -1,0 +1,12 @@
+default_safe_mode: true
+safe_mode_patterns:
+  destructive:
+    - "rm\\s+-rf\\s+/"
+    - "rm\\s+-rf\\s+\\$\\{?HOME\\}?"
+    - "rm\\s+-rf\\s+\\."
+    - "mkfs\\s+"
+    - "dd\\s+if="
+  warn:
+    - "rm\\s+-rf"
+    - "git\\s+reset\\s+--hard"
+    - "docker\\s+system\\s+prune"

@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "schema": "https://modelcontextprotocol.io/schemas/capabilities.json",
+  "provider": {
+    "name": "tmux-mcp-agent",
+    "description": "Cursor MCP integration for shared tmux sessions",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "connect_session",
+      "description": "Create or attach to a shared tmux session on the selected profile.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["profile"],
+        "properties": {
+          "profile": {
+            "type": "string",
+            "description": "Name of the stored SSH connection profile."
+          },
+          "session": {
+            "type": "string",
+            "description": "Optional tmux session name override."
+          },
+          "window": {
+            "type": "string",
+            "description": "Optional window name to ensure exists."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "session": { "type": "string" },
+          "window": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "submit_command",
+      "description": "Send a command to the shared tmux pane and capture resulting output.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["task_id", "command"],
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "description": "Optional caller-provided identifier for the command."
+          },
+          "task_id": {
+            "type": "string",
+            "description": "Cursor task identifier for logging."
+          },
+          "session": { "type": "string" },
+          "window": { "type": "string" },
+          "pane": { "type": "string" },
+          "command": { "type": "string" },
+          "metadata": {
+            "type": "object",
+            "description": "Arbitrary metadata stored alongside the log entry."
+          },
+          "safe_mode": {
+            "type": "boolean",
+            "description": "Override default safe-mode behaviour for this command only."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Execute immediately and mark as user-approved."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "command_id": { "type": "string" },
+          "status": { "type": "string" },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" },
+          "safety": { "type": "object" },
+          "approvedByUser": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "approve_command",
+      "description": "Approve a previously submitted command that was waiting for confirmation.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["command_id"],
+        "properties": {
+          "command_id": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" },
+          "approvedByUser": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "reject_command",
+      "description": "Reject a pending command awaiting approval.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["command_id"],
+        "properties": {
+          "command_id": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "read_context",
+      "description": "Capture the current tmux pane content for model grounding.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session": { "type": "string" },
+          "window": { "type": "string" },
+          "pane": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "context": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "list_profiles",
+      "description": "Return stored SSH profiles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
+        }
+      }
+    },
+    {
+      "name": "upsert_profile",
+      "description": "Save or update an SSH connection profile.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["profile"],
+        "properties": {
+          "profile": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "profile": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "delete_profile",
+      "description": "Remove an SSH profile by name.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "profile": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "prompts": [],
+  "resources": []
+}
