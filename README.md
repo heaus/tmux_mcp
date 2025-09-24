@@ -8,10 +8,10 @@ Project Kinesis lets Cursor register an MCP tool that shares a tmux session with
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m tmux_mcp.agent --config .cursor/manifest.json
+python -m tmux_mcp.agent --config-dir .cursor
 ```
 
-To smoke test the tmux integration, run `scripts/dev/launch.sh mcp-dev` which launches the MCP server and ensures a disposable session named `mcp-dev` exists.
+To smoke test the tmux integration, run `python scripts/start_mcp_agent.py --session mcp-dev --window agent` which launches the MCP server with a disposable session named `mcp-dev`.
 
 ## Cursor MCP Registration
 

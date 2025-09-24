@@ -1,10 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Keep runtime code under `src/tmux_mcp/` and mirror unit tests in `tests/`. Place helper scripts in `scripts/` (for example `scripts/dev/launch.sh`) and human-facing docs in `docs/`. Persist reusable assets, recordings, or sample layouts in `assets/`. Store agent manifests beside the modules they describe, e.g. `.cursor/manifest.json`.
+Keep runtime code under `src/tmux_mcp/` and mirror unit tests in `tests/`. Place helper scripts in `scripts/` and human-facing docs in `docs/`. Persist reusable assets, recordings, or sample layouts in `assets/`. Store agent manifests beside the modules they describe, e.g. `.cursor/manifest.json`.
 
 ## Build, Test, and Development Commands
-Create a local environment with `python -m venv .venv` followed by `source .venv/bin/activate`. Install runtime deps using `pip install -r requirements.txt`; add development extras via `pip install -r requirements-dev.txt`. Launch the agent with `python -m tmux_mcp.agent --config .cursor/manifest.json`. Use `scripts/dev/launch.sh session-name` for a smoke test that boots a disposable tmux session.
+Create a local environment with `python -m venv .venv` followed by `source .venv/bin/activate`. Install runtime deps using `pip install -r requirements.txt`; add development extras via `pip install -r requirements-dev.txt`. Launch the agent with `python scripts/start_mcp_agent.py --config-dir .cursor`. Use `python scripts/start_mcp_agent.py --session session-name --window agent` for a smoke test that boots a disposable tmux session.
 
 ## Coding Style & Naming Conventions
 Target Python 3.11+. Format with `black` (88 columns) and lint with `ruff`; wire them through `pre-commit`. Use snake_case for functions and variables, PascalCase for classes, and UPPER_SNAKE for constants. Prefer short, hyphenated config filenames such as `config/default-manifest.json`. Add comments only when they clarify non-obvious logic.
