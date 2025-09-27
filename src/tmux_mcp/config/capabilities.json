@@ -27,14 +27,6 @@
             "description": "Optional window name to ensure exists."
           }
         }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" },
-          "session": { "type": "string" },
-          "window": { "type": "string" }
-        }
       }
     },
     {
@@ -69,17 +61,6 @@
             "description": "Execute immediately and mark as user-approved."
           }
         }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "command_id": { "type": "string" },
-          "status": { "type": "string" },
-          "stdout": { "type": "string" },
-          "stderr": { "type": "string" },
-          "safety": { "type": "object" },
-          "approvedByUser": { "type": "boolean" }
-        }
       }
     },
     {
@@ -91,15 +72,6 @@
         "properties": {
           "command_id": { "type": "string" }
         }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" },
-          "stdout": { "type": "string" },
-          "stderr": { "type": "string" },
-          "approvedByUser": { "type": "boolean" }
-        }
       }
     },
     {
@@ -110,12 +82,6 @@
         "required": ["command_id"],
         "properties": {
           "command_id": { "type": "string" }
-        }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" }
         }
       }
     },
@@ -129,12 +95,6 @@
           "window": { "type": "string" },
           "pane": { "type": "string" }
         }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "context": { "type": "string" }
-        }
       }
     },
     {
@@ -143,15 +103,6 @@
       "inputSchema": {
         "type": "object",
         "properties": {}
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "profiles": {
-            "type": "array",
-            "items": { "type": "object" }
-          }
-        }
       }
     },
     {
@@ -163,13 +114,6 @@
         "properties": {
           "profile": { "type": "object" }
         }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" },
-          "profile": { "type": "string" }
-        }
       }
     },
     {
@@ -180,13 +124,6 @@
         "required": ["name"],
         "properties": {
           "name": { "type": "string" }
-        }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "status": { "type": "string" },
-          "profile": { "type": "string" }
         }
       }
     }

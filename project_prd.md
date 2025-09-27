@@ -22,7 +22,7 @@ The vision is to bridge the gap between AI code generation and practical applica
 #### **In Scope (v1.0)**
 
 * **Connection Management:** Securely storing and managing persistent SSH connection details for the AI agent's connection.  
-* **tmux Session Handling:** Automatically creating or attaching to a shared tmux session through libtmux
+* **tmux Session Handling:** Automatically creating or attaching to a shared tmux session by issuing tmux commands over a persistent SSH connection
 * **AI Interaction:** The AI can send commands, and the user interacts via their own terminal.  
 * **Command Auditing & Safety:** Logging of AI commands and a user-configurable safety mechanism.
 
@@ -60,5 +60,3 @@ The vision is to bridge the gap between AI code generation and practical applica
 | **NFR-3** | **Reliability** | The agent should handle network drops gracefully and attempt to auto-reconnect. |
 | **NFR-4** | **Usability** | The process of configuring a new connection and starting a session for the agent should be simple and require minimal steps. |
 | **NFR-5** | **Compatibility** | Must be compatible with standard OpenSSH servers and tmux version 1.8 or newer. |
-
-

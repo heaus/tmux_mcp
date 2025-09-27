@@ -1,4 +1,4 @@
-"""Session management helpers wrapping libtmux and SSH profile storage."""
+"""Session management helpers for SSH-backed tmux control."""
 
 from __future__ import annotations
 
@@ -17,10 +17,9 @@ try:
 except ImportError:  # pragma: no cover - optional dependency during testing
     keyring = None
 
-try:
-    import libtmux  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency during testing
-    libtmux = None
+import paramiko
+from paramiko.proxy import ProxyCommand
+from paramiko.ssh_exception import AuthenticationException, SSHException
 
 
 class SessionError(RuntimeError):
@@ -86,8 +85,16 @@ class ConnectionProfileStore:
         config_dir: Optional[Path] = None,
         key_provider: Optional[KeyProvider] = None,
     ) -> None:
-        self.config_dir = config_dir or Path(os.path.expanduser("~/.config/tmux_mcp"))
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        base_dir = config_dir or Path(
+            os.environ.get("TMUX_MCP_HOME", os.path.expanduser("~/.config/tmux_mcp"))
+        )
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+            self.config_dir = base_dir
+        except PermissionError:
+            fallback = Path.cwd() / ".tmux_mcp"
+            fallback.mkdir(parents=True, exist_ok=True)
+            self.config_dir = fallback
         self.path = self.config_dir / "connections.json.enc"
         self.key_provider = key_provider or KeyProvider()
 
@@ -139,23 +146,252 @@ class ConnectionProfileStore:
         return Fernet(key)
 
 
+def _format_tmux_command(*parts: str) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+@dataclass(slots=True)
+class _CommandResult:
+    stdout: str
+    stderr: str
+    returncode: int
+
+
+class _RemoteTmuxClient:
+    """Executes tmux commands on a remote host via a persistent SSH session."""
+
+    def __init__(self, profile: ConnectionProfile, *, timeout: int = 30) -> None:
+        self.profile = profile
+        self._timeout = timeout
+        self._options = {
+            key.lower(): value for key, value in profile.ssh_options.items()
+        }
+        self._proxy: Optional[ProxyCommand] = None
+        self._ssh: Optional[paramiko.SSHClient] = None
+        self._ssh = self._connect()
+
+    def __del__(self) -> None:  # pragma: no cover - best effort cleanup
+        self.close()
+
+    def close(self) -> None:
+        if self._ssh is not None:
+            try:
+                self._ssh.close()
+            finally:
+                self._ssh = None
+        if self._proxy is not None:
+            try:
+                self._proxy.close()
+            finally:
+                self._proxy = None
+
+    def ensure_session(
+        self, *, session_name: str, window_name: Optional[str] = None
+    ) -> None:
+        exists = self._run_tmux("has-session", "-t", session_name)
+        if exists.returncode != 0:
+            args = ["new-session", "-d", "-s", session_name]
+            if window_name:
+                args.extend(["-n", window_name])
+            created = self._run_tmux(*args)
+            if created.returncode != 0:
+                self._handle_failure(created, f"create session '{session_name}'")
+        if window_name:
+            if not self._window_exists(session_name, window_name):
+                created = self._run_tmux(
+                    "new-window", "-t", session_name, "-n", window_name
+                )
+                if created.returncode != 0:
+                    self._handle_failure(
+                        created,
+                        f"create window '{window_name}' in session '{session_name}'",
+                    )
+
+    def get_pane(
+        self, session_name: str, window_name: str, pane_ref: str
+    ) -> "_RemotePane":
+        target = f"{session_name}:{window_name}"
+        panes = self._run_tmux(
+            "list-panes", "-t", target, "-F", "#{pane_id}:#{pane_index}"
+        )
+        if panes.returncode != 0:
+            self._handle_failure(panes, f"locate panes in window '{window_name}'")
+        for line in panes.stdout.splitlines():
+            if not line:
+                continue
+            try:
+                pane_id, pane_index = line.split(":", 1)
+            except ValueError:
+                continue
+            if pane_ref in {pane_id, pane_index}:
+                return _RemotePane(self, pane_id)
+        raise SessionError(f"Pane '{pane_ref}' not available")
+
+    def list_windows(self, session_name: str) -> list[str]:
+        result = self._run_tmux(
+            "list-windows", "-t", session_name, "-F", "#{window_name}"
+        )
+        if result.returncode != 0:
+            self._handle_failure(result, f"inspect windows for '{session_name}'")
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _window_exists(self, session_name: str, window_name: str) -> bool:
+        return window_name in self.list_windows(session_name)
+
+    def _connect(self) -> paramiko.SSHClient:
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        strict = self._options.get("stricthostkeychecking", "no").lower()
+        if strict == "yes":
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        connect_kwargs: Dict[str, object] = {
+            "hostname": self.profile.hostname,
+            "port": self.profile.port,
+            "username": self.profile.username,
+            "timeout": self._timeout,
+            "allow_agent": True,
+            "look_for_keys": True,
+        }
+
+        identities_only = self._options.get("identitiesonly")
+        if identities_only and identities_only.lower() in {"yes", "true", "1"}:
+            connect_kwargs["allow_agent"] = False
+            connect_kwargs["look_for_keys"] = False
+
+        if self.profile.identity_file:
+            key_path = os.path.expanduser(self.profile.identity_file)
+            if os.path.exists(key_path):
+                connect_kwargs["key_filename"] = key_path
+
+        password = self._options.get("password")
+        if password:
+            connect_kwargs["password"] = password
+
+        known_hosts = self._options.get("userknownhostsfile")
+        if known_hosts:
+            for path in shlex.split(known_hosts):
+                expanded = os.path.expanduser(path)
+                if os.path.exists(expanded):
+                    try:
+                        client.load_host_keys(expanded)
+                    except Exception:  # pragma: no cover - defensive
+                        pass
+
+        proxy_command = self._options.get("proxycommand")
+        if proxy_command:
+            formatted = (
+                proxy_command.replace("%h", self.profile.hostname)
+                .replace("%p", str(self.profile.port))
+                .replace("%r", self.profile.username)
+            )
+            self._proxy = ProxyCommand(formatted)
+            connect_kwargs["sock"] = self._proxy
+
+        try:
+            client.connect(**connect_kwargs)
+        except AuthenticationException as exc:  # pragma: no cover - depends on env
+            raise SessionError(
+                f"SSH authentication failed for profile '{self.profile.name}'"
+            ) from exc
+        except SSHException as exc:  # pragma: no cover - depends on env
+            raise SessionError(
+                f"SSH connection failed for profile '{self.profile.name}'"
+            ) from exc
+        except OSError as exc:  # pragma: no cover - depends on env
+            raise SessionError(
+                f"Unable to reach {self.profile.hostname}:{self.profile.port}"
+            ) from exc
+
+        keepalive = self._options.get("serveraliveinterval")
+        if keepalive:
+            try:
+                interval = int(keepalive)
+            except ValueError:  # pragma: no cover - defensive
+                interval = 0
+            if interval > 0:
+                transport = client.get_transport()
+                if transport is not None:
+                    transport.set_keepalive(interval)
+
+        return client
+
+    def _run_tmux(self, *args: str) -> _CommandResult:
+        if self._ssh is None:
+            raise SessionError("SSH session not established")
+        command = _format_tmux_command("tmux", *args)
+        try:
+            stdin, stdout, stderr = self._ssh.exec_command(
+                command,
+                timeout=self._timeout,
+            )
+            try:
+                exit_code = stdout.channel.recv_exit_status()
+            finally:
+                stdin.close()
+            stdout_data = stdout.read().decode("utf-8", errors="replace")
+            stderr_data = stderr.read().decode("utf-8", errors="replace")
+            return _CommandResult(
+                stdout=stdout_data, stderr=stderr_data, returncode=exit_code
+            )
+        except SSHException as exc:
+            raise SessionError(
+                "SSH connection lost while issuing tmux command"
+            ) from exc
+
+    def _handle_failure(self, result: _CommandResult, action: str) -> None:
+        payload = (result.stderr or result.stdout or "unknown error").strip()
+        lowered = payload.lower()
+        if "tmux" in lowered and "not found" in lowered:
+            raise SessionError(
+                "tmux binary not found on remote host; install tmux or expose it via PATH"
+            )
+        if "permission denied" in lowered:
+            raise SessionError(f"Permission denied while attempting to {action}")
+        if "no such file or directory" in lowered:
+            raise SessionError(payload)
+        raise SessionError(f"Failed to {action}: {payload}")
+
+
+class _RemotePane:
+    """Represents a tmux pane accessible over a persistent SSH session."""
+
+    def __init__(self, client: _RemoteTmuxClient, pane_id: str) -> None:
+        self._client = client
+        self._pane_id = pane_id
+
+    def capture_pane(self, lines: int = 200) -> list[str]:
+        result = self._client._run_tmux(
+            "capture-pane", "-t", self._pane_id, "-p", "-S", f"-{lines}"
+        )
+        if result.returncode != 0:
+            self._client._handle_failure(result, f"capture pane '{self._pane_id}'")
+        text = result.stdout or ""
+        stripped = text.rstrip("\n")
+        if not stripped:
+            return []
+        return stripped.splitlines()
+
+    def send_keys(self, keys: str, enter: bool = True) -> None:
+        args = ["send-keys", "-t", self._pane_id, keys]
+        if enter:
+            args.append("Enter")
+        result = self._client._run_tmux(*args)
+        if result.returncode != 0:
+            self._client._handle_failure(result, f"send keys to pane '{self._pane_id}'")
+
+
 class SessionManager:
-    """Controls tmux sessions and panes via libtmux."""
+    """Controls remote tmux sessions and panes via SSH."""
 
     def __init__(
-        self, profile_store: ConnectionProfileStore, *, server_factory=None
+        self, profile_store: ConnectionProfileStore, *, timeout: int = 30
     ) -> None:
         self.profile_store = profile_store
-        if server_factory is None:
-            if libtmux is None:
-                raise RuntimeError(
-                    "libtmux must be installed when no server_factory is provided"
-                )
-            server_factory = lambda profile: libtmux.Server(
-                ssh_command=profile.to_ssh_command()
-            )  # type: ignore[arg-type]
-        self.server_factory = server_factory
-        self._server = None
+        self._timeout = timeout
+        self._tmux_client: Optional[_RemoteTmuxClient] = None
         self._current_profile: Optional[ConnectionProfile] = None
 
     def connect(
@@ -164,43 +400,32 @@ class SessionManager:
         profile = self.profile_store.get_profile(profile_name)
         if profile is None:
             raise SessionError(f"Profile '{profile_name}' not found")
-        self._server = self.server_factory(profile)
+        if self._tmux_client is not None:
+            self._tmux_client.close()
+        self._tmux_client = _RemoteTmuxClient(profile, timeout=self._timeout)
         self._current_profile = profile
         self.ensure_session(session_name=session_name, window_name=window_name)
 
-    def ensure_session(self, *, session_name: str, window_name: Optional[str] = None):
-        if self._server is None:
+    def ensure_session(
+        self, *, session_name: str, window_name: Optional[str] = None
+    ) -> None:
+        if self._tmux_client is None:
             raise SessionError("Server not connected")
-        session = self._server.find_where({"session_name": session_name})
-        if session is None:
-            session = self._server.new_session(
-                session_name=session_name, attach=False, kill_session=False
-            )
-        if window_name is not None:
-            window = session.find_where({"window_name": window_name})
-            if window is None:
-                window = session.new_window(window_name=window_name, attach=False)
-            return window
-        return session
+        self._tmux_client.ensure_session(
+            session_name=session_name, window_name=window_name
+        )
 
-    def get_pane(self, session_name: str, window_name: str, pane_ref: str):
-        if self._server is None:
+    def get_pane(
+        self, session_name: str, window_name: str, pane_ref: str
+    ) -> _RemotePane:
+        if self._tmux_client is None:
             raise SessionError("Server not connected")
-        session = self._server.find_where({"session_name": session_name})
-        if session is None:
-            raise SessionError(f"Session '{session_name}' not available")
-        window = session.find_where({"window_name": window_name})
-        if window is None:
-            raise SessionError(f"Window '{window_name}' not available")
-        for pane_obj in window.panes:
-            pane_id = pane_obj.get("pane_id")
-            pane_index = str(pane_obj.get("pane_index"))
-            if pane_ref in {pane_id, pane_index}:
-                return pane_obj
-        raise SessionError(f"Pane '{pane_ref}' not available")
+        return self._tmux_client.get_pane(session_name, window_name, pane_ref)
 
     def disconnect(self) -> None:
-        self._server = None
+        if self._tmux_client is not None:
+            self._tmux_client.close()
+        self._tmux_client = None
         self._current_profile = None
 
     @property
